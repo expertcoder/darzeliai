@@ -13,13 +13,16 @@ import sys
 import numpy as np
 import json
 
+def isNaN(num):
+    return num != num
+
 def dataframe_to_json_print(df):
     json_string = df.to_json(orient = 'records', force_ascii=False)
     json_object = json.loads(json_string)
     return json.dumps(json_object, indent=4, sort_keys=True, ensure_ascii=False)
 
 def dataframe_to_json_file(df):
-    df.to_json('data-v3.json', orient = 'records', force_ascii=False)
+    df.to_json('data-v7.json', orient = 'records', force_ascii=False)
 
 
 def format_dict(dict, arg):
@@ -27,6 +30,32 @@ def format_dict(dict, arg):
     for k, v in dict.items():
         ndict[ k.format(arg) ] = v.format(arg)
     return ndict
+
+def tidy_row(row):
+
+    row['preferences'] = [{} for i in range(PREFERENCE_AMOUNT)]
+
+    for key, value in row.iteritems():
+
+        chunks = key.split('|')
+        if len(chunks) == 3:
+            ignore, preference_attribute, preference_number = chunks
+            preference_number = int(preference_number)
+            row['preferences'][ preference_number  - 1][preference_attribute] = value
+            row['preferences'][ preference_number  - 1]['preference_number'] = preference_number
+
+
+    for i, values in enumerate(row['preferences'] ):
+        #Some students will haev less than 5 preferences, in this case remove the useless list element
+        if isNaN(values['school_name']):
+            row['preferences'] = row['preferences'][:i]
+
+    return row
+
+# ---------- begin script ---------
+
+PREFERENCE_AMOUNT = 5
+
 
 df_schools = pd.read_csv('schools.csv', sep=";")
 
@@ -43,7 +72,7 @@ df_schools.rename(inplace=True, columns={'ID': 'municipality_internal_id',
                         'GIS_Y': 'gis_y'
                         })
 
-df_prefs = pd.read_csv('prefs.csv', sep=";", true_values=["Taip"], false_values=["Ne"])
+df_prefs = pd.read_csv('prefs-short.csv', sep=";", true_values=["Taip"], false_values=["Ne"])
 
 #Fix error in CSV file.
 df_prefs.rename(inplace=True, columns={'Tinkamų grupių 13darželyje': 'Tinkamų grupių 3 darželyje'})
@@ -62,60 +91,34 @@ columns = { 'Nr.': 'some_number',
            }
 
 
-dynamic_columns_template = {'{} pasirinktas darželis': 'preference_{}_school_name',
-           '{} darželio Seniūnija':'preference_{}_school_district',
-           '{} darželio grupės ugdomoji kalba':'preference_{}_school_language',
-           '{} darželio grupės ugdymo metodika':'preference_{}_some_other_info',
-           '{} darželio grupės tipas':'preference_{}_age_group',
-           '{} darželio grupės amžiaus intervalas':'preference_{}_age_interval',
-           'Atitinka {} darželiui priskirta teritorija':'preference_{}_same_territory',
-           '{} darželį lanko broliai/seserys':'preference_{}_sibling_at_school',
-           'Tinkamų grupių {} darželyje':'preference_{}_if_fit_group'}
+preference_columns_template = {'{} pasirinktas darželis': 'preference|school_name|{}',
+           '{} darželio vieta eilėje':'preference|translation_needed_darzelio_vieta_eileje|{}',
+           '{} darželio Seniūnija':'preference|school_district|{}',
+           '{} darželio grupės ugdomoji kalba':'preference|school_language|{}',
+           '{} darželio grupės ugdymo metodika':'preference|some_other_info|{}',
+           '{} darželio grupės tipas':'preference|age_group|{}',
+           '{} darželio grupės amžiaus intervalas':'preference|age_interval|{}',
+           'Atitinka {} darželiui priskirta teritorija':'preference|same_territory|{}',
+           '{} darželį lanko broliai/seserys':'preference|sibling_at_school|{}',
+           'Tinkamų grupių {} darželyje':'preference|if_fit_group|{}'}
 
-for i in range(1,6):
-    columns.update (format_dict(dynamic_columns_template, i))
+preference_columns = {}
 
-
-
-def myfunc(row):
-    row['preferences'] = []
-
-    # print row
-    # sys.exit()
-
-    for i in range(1, 6):
-        d = format_dict(dynamic_columns_template, i)
-        preferences_dict = {}
-        for jk, jv in d.items():
-
-            # print jv
-            # print jv
-            # sys.exit()
-
-            preferences_dict[jv[13:] ] = row[jv]
-        row['preferences'].append(preferences_dict)
-
-    return row
-
+for i in range(1,PREFERENCE_AMOUNT + 1):
+    preference_columns_formatted = format_dict(preference_columns_template, i)
+    preference_columns.update(preference_columns_formatted)
+    columns.update(preference_columns_formatted)
 
 
 df_prefs.rename(inplace=True, columns=columns)
 
-df_prefs = df_prefs[ columns.values() ]   #TODO quick work around, might not be needed later
+df_prefs = df_prefs.apply(tidy_row, axis=1)
 
-df_prefs = df_prefs.apply(myfunc, axis=1)
 
-#Quick hack to remove columns which are no longer needed
-for i in range(1,6):
-    d = format_dict(dynamic_columns_template, i)
-    for jk, jv in d.items():
-        del df_prefs[jv ]
+df_prefs.drop(preference_columns.values(), inplace=True, axis=1 )  #Remove the original preference columns which are no longer needed
 
-dataframe_to_json_file(df_prefs.head() )
+dataframe_to_json_file(df_prefs )
 
-# print ( dataframe_to_json(df_prefs.head()) )
-
-# df_merged = pd.merge(df_schools, df_prefs, left_on='name', right_on='preference_1_school_name')
 
 
 
